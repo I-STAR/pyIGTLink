@@ -1,1 +1,1 @@
-from pyIGTLink import *  # noqa
+from .pyIGTLink import *  # noqa

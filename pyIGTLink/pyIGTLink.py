@@ -222,7 +222,7 @@ class MessageBase(object):
 
 # http://openigtlink.org/protocols/v2_image.html
 class ImageMessage(MessageBase):
-    def __init__(self, image, spacing=[1, 1, 1], timestamp=None, device_name=''):
+    def __init__(self, image, spacing=[1, 1, 1], matrix = np.eye(4), ImageCoordinateSystem = 'RAS', timestamp=None, device_name='Image'):
         """
         Image package
         image - image data
@@ -249,65 +249,97 @@ class ImageMessage(MessageBase):
             _print('ERROR, INVALID IMAGE SIZE. \n')
             return
 
-
-# Only int8 is suppoerted now
-#        if self._data.dtype == np.int8:
-#            self._datatype_s = 2
-#            self._format_data = "b"
-#        elif self._data.dtype == np.uint8:
-#            self._datatype_s = 3
-#            self._format_data = "B"
-#        elif self._data.dtype == np.int16:
-#            self._datatype_s = 4
-#            self._format_data = "h"
-#        elif self._data.dtype == np.uint16:
-#            self._datatype_s = 5
-#            self._format_data = "H"
-#        elif self._data.dtype == np.int32:
-#            self._datatype_s = 6
-#            self._format_data = "i"
-#        elif self._data.dtype == np.uint32:
-#            self._datatype_s = 7
-#            self._format_data = "I"
-#        elif self._data.dtype == np.float32:
-#            self._datatype_s = 10
-#            self._format_data = "f"
-#        elif self._data.dtype == np.float64:
-#            self._datatype_s = 11
-#            self._format_data = "f"
-#        else:
-#            pass
-        self._data = np.array(self._data, dtype=np.uint8)
-        self._datatype_s = 3
-        self._format_data = "B"
+        # Set image specifications
+        if self._data.dtype == np.int8:
+            self._datatype_s = 2
+            self._format_data = "b"
+        elif self._data.dtype == np.uint8:
+            self._datatype_s = 3
+            self._format_data = "B"
+        elif self._data.dtype == np.int16:
+            self._datatype_s = 4
+            self._format_data = "h"
+        elif self._data.dtype == np.uint16:
+            self._datatype_s = 5
+            self._format_data = "H"
+        elif self._data.dtype == np.int32:
+            self._datatype_s = 6
+            self._format_data = "i"
+        elif self._data.dtype == np.uint32:
+            self._datatype_s = 7
+            self._format_data = "I"
+        elif self._data.dtype == np.float32:
+            self._datatype_s = 10
+            self._format_data = "f"
+        elif self._data.dtype == np.float64:
+            self._datatype_s = 11
+            self._format_data = "f"
+        else:
+            _print('ERROR, INVALID IMAGE DATA TYPE. \n')
+            return
 
         self._spacing = spacing
-        self._matrix = np.identity(4)  # A matrix representing the origin and the orientation of the image.
+        self._matrix = matrix  # A matrix representing the origin and the orientation of the image.
+        self._ImageCoordinateSystem = ImageCoordinateSystem # Image coordinate system convention
 
     def pack_body(self):
         binary_message = struct.pack(self._endian+"H", IGTL_IMAGE_HEADER_VERSION)
         # Number of Image Components (1:Scalar, >1:Vector). (NOTE: Vector data is stored fully interleaved.)
-        binary_message += struct.pack(self._endian+"B", len(self._data.shape) - 1)
+        if len(self._data.shape) <= 3:
+            binary_message += struct.pack(self._endian+"B", 1)
+        else:
+             _print('ERROR, @TODO: VECTOR VOLUMES NOT YET IMPLEMENTED. \n')
+             return
+            #binary_message += struct.pack(self._endian+"B", len(self._data.shape) - 3) # NOT SURE IF THIS IS CORRECT...??
         binary_message += struct.pack(self._endian+"B", self._datatype_s)
 
         if self._data.dtype.byteorder == "<":
-            byteorder = "F"
+            byteorder = "C"
             binary_message += struct.pack(self._endian+"B", 2)  # Endian for image data (1:BIG 2:LITTLE)
             # (NOTE: values in image header is fixed to BIG endian)
-        else:
-            self._data.dtype.byteorder == ">"
-            byteorder = "C"
+        elif self._data.dtype.byteorder == ">":
+            byteorder = "F"
             binary_message += struct.pack(self._endian+"B", 1)  # Endian for image data (1:BIG 2:LITTLE)
             # (NOTE: values in image header is fixed to BIG endian)
+        else: 
+            # Check system...
+            if sys.byteorder == "little":
+                self._data.dtype.byteorder == "<"
+                byteorder = "C"
+                binary_message += struct.pack(self._endian+"B", 2)  # Endian for image data (1:BIG 2:LITTLE)
+                # (NOTE: values in image header is fixed to BIG endian)
+            elif sys.byteorder == "big":
+                self._data.dtype.byteorder == ">"
+                byteorder = "F"
+                binary_message += struct.pack(self._endian+"B", 1)  # Endian for image data (1:BIG 2:LITTLE)
+                # (NOTE: values in image header is fixed to BIG endian)
+            else:
+                _print('ERROR, UNKNOWN SYSTEM BYTEORDER. \n')
+                return
 
-        binary_message += struct.pack(self._endian+"B", 1)  # image coordinate (1:RAS 2:LPS)
-
-        binary_message += struct.pack(self._endian+"H", self._data.shape[1])
-        binary_message += struct.pack(self._endian+"H", self._data.shape[0])
-        if len(self._data.shape) > 2:
-            binary_message += struct.pack(self._endian+"H", self._data.shape[2])
+        if self._ImageCoordinateSystem == "RAS":
+            binary_message += struct.pack(self._endian+"B", 1)  # image coordinate (1:RAS 2:LPS)
+        elif self._ImageCoordinateSystem == "LPS":
+            binary_message += struct.pack(self._endian+"B", 2)  # image coordinate (1:RAS 2:LPS)
         else:
+            _print('ERROR, UNKNOWN IMAGE COORDINATE SYSTEM. OPTIONS ARE: RAS, LPS \n')
+            return
+
+        if len(self._data.shape) == 2:
+            binary_message += struct.pack(self._endian+"H", self._data.shape[1])
+            binary_message += struct.pack(self._endian+"H", self._data.shape[0])
             binary_message += struct.pack(self._endian+"H", 1)
+        elif len(self._data.shape) > 2:
+            binary_message += struct.pack(self._endian+"H", self._data.shape[2])
+            binary_message += struct.pack(self._endian+"H", self._data.shape[1])
+            binary_message += struct.pack(self._endian+"H", self._data.shape[0])
+
+        # binary_message += struct.pack(self._endian+"H", self._data.shape[1])
+        # binary_message += struct.pack(self._endian+"H", self._data.shape[0])
+        # if len(self._data.shape) > 2:
+        #     binary_message += struct.pack(self._endian+"H", self._data.shape[2])
+        # else:
+        #     binary_message += struct.pack(self._endian+"H", 1)
 
         origin = np.zeros(3)
         norm_i = np.zeros(3)
@@ -336,12 +368,21 @@ class ImageMessage(MessageBase):
         binary_message += struct.pack(self._endian+"H", 0)      # Starting index of subvolume
         binary_message += struct.pack(self._endian+"H", 0)      # Starting index of subvolume
 
-        binary_message += struct.pack(self._endian+"H", self._data.shape[0])  # number of pixels of subvolume
-        binary_message += struct.pack(self._endian+"H", self._data.shape[1])
-        if len(self._data.shape) > 2:
-            binary_message += struct.pack(self._endian+"H", self._data.shape[2])
-        else:
+        if len(self._data.shape) == 2:
+            binary_message += struct.pack(self._endian+"H", self._data.shape[1])
+            binary_message += struct.pack(self._endian+"H", self._data.shape[0])
             binary_message += struct.pack(self._endian+"H", 1)
+        elif len(self._data.shape) > 2:
+            binary_message += struct.pack(self._endian+"H", self._data.shape[2])
+            binary_message += struct.pack(self._endian+"H", self._data.shape[1])
+            binary_message += struct.pack(self._endian+"H", self._data.shape[0])
+
+        # binary_message += struct.pack(self._endian+"H", self._data.shape[0])  # number of pixels of subvolume
+        # binary_message += struct.pack(self._endian+"H", self._data.shape[1])
+        # if len(self._data.shape) > 2:
+        #     binary_message += struct.pack(self._endian+"H", self._data.shape[2])
+        # else:
+        #     binary_message += struct.pack(self._endian+"H", 1)
 
         binary_message += self._data.tostring(byteorder)  # struct.pack(fmt,*data)
         self._body_pack_size = len(binary_message)
@@ -350,7 +391,7 @@ class ImageMessage(MessageBase):
 
 
 class Tdata(MessageBase):
-    def __init__(self, msg, timestamp=None, device_name=''):
+    def __init__(self, msg, timestamp=None, device_name='Tdata'):
         MessageBase.__init__(self)
         self._valid_message = True
         self._name = "TDATA"
@@ -395,7 +436,7 @@ class Tdata(MessageBase):
 
 
 class TransformMessage(MessageBase):
-    def __init__(self, tform, timestamp=None, device_name=''):
+    def __init__(self, tform, timestamp=None, device_name='Transform'):
         """
         Image package
         image - image data
@@ -481,7 +522,7 @@ class TransformMessage(MessageBase):
 
 
 class StringMessage(MessageBase):
-    def __init__(self, string, timestamp=None, device_name='', encoding=3):
+    def __init__(self, string, timestamp=None, device_name='String', encoding=3):
 
         MessageBase.__init__(self)
         self._valid_message = True
